@@ -1,7 +1,6 @@
-package ru.vsu.cs.cg.pronin_s_v.task1_primitives;
+package ru.vsu.cs.cg.pronin_s_v.task1_primitives.ui;
 
 import javax.swing.*;
-import java.awt.*;
 
 public class MainWindow extends JFrame {
 
