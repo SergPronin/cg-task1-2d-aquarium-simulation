@@ -10,10 +10,7 @@ public class MainWindow extends JFrame {
         setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
         setSize(900, 540);
         setLocationRelativeTo(null);
-
-        JPanel placeholder = new JPanel();
-        placeholder.setBackground(new Color(236, 230, 220));
-        setContentPane(placeholder);
+        setContentPane(new GamePanel());
 
         setVisible(true);
     }
