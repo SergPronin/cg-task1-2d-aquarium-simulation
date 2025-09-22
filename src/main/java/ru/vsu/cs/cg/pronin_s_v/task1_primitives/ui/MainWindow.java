@@ -7,7 +7,7 @@ public class MainWindow extends JFrame {
     public MainWindow() {
         super("Aquarium");
         setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
-        setSize(900, 540);
+        setSize(900, 740);
         setLocationRelativeTo(null);
         setContentPane(new GamePanel());
 
