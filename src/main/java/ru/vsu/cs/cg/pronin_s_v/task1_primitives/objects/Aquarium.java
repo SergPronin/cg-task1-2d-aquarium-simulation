@@ -28,6 +28,27 @@ public class Aquarium implements Static {
         );
     }
 
+    // в Aquarium.java
+    public Shape getWaterClipShape() {
+        // прямоугольник воды до уровня песка (чтобы рыбы не плавали в песке и над крышкой)
+        return new Rectangle(
+                bounds.x + 4,
+                bounds.y + 4,
+                bounds.width - 8,
+                Math.max(0, groundY - (bounds.y + 4))
+        );
+    }
+
+    public Rectangle getInnerRect() {
+        // чистый прямоугольник для коллизий динамики
+        return new Rectangle(
+                bounds.x + 8,
+                bounds.y + 8,
+                bounds.width - 16,
+                Math.max(0, groundY - (bounds.y + 8))
+        );
+    }
+
     @Override
     public void draw(Graphics2D g2) {
         // Вода
