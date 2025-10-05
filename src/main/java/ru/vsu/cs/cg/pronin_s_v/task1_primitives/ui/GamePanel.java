@@ -16,7 +16,7 @@ public class GamePanel extends JPanel {
     public static final Rectangle AQUARIUM_BOUNDS = new Rectangle(140, 120, 620, 320);
     public static final int GROUND_LEVEL_Y = AQUARIUM_BOUNDS.y + AQUARIUM_BOUNDS.height - 32;
 
-    // Параметры песка (для Aquarium)
+    // Параметры песка
     private static final double SAND_WAVE_AMPLITUDE  = 6.0;
     private static final double SAND_WAVE_LENGTH     = 80.0;
     private static final int    SAND_WAVE_STEP       = 8;
@@ -29,7 +29,6 @@ public class GamePanel extends JPanel {
         setBackground(new Color(236, 230, 220));
         setDoubleBuffered(true);
 
-        // Слои сцены
         statics.add(new BackgroundWall(WINDOW_WIDTH, WINDOW_HEIGHT));
 
         aquarium = new Aquarium(
@@ -63,7 +62,6 @@ public class GamePanel extends JPanel {
         int chestY = GROUND_LEVEL_Y - chestH + 6;
         statics.add(new Chest(chestX, chestY, chestW, chestH, chestLid));
 
-        // Комод (наполовину виден)
         statics.add(new CabinetHalf(AQUARIUM_BOUNDS));
     }
 
@@ -75,7 +73,6 @@ public class GamePanel extends JPanel {
         g2.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE);
 
         for (Static s : statics) s.draw(g2);
-        // Стекло/рамка/крышка поверх
         aquarium.drawGlassOverlay(g2);
 
         g2.dispose();

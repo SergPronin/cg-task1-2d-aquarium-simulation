@@ -25,10 +25,9 @@ public class Plant implements Static {
 
     @Override
     public void draw(Graphics2D g2) {
-        // --- КОНТРОЛЬНАЯ ТОЧКА ДЛЯ ИЗГИБА ---
-        // Управляющая точка кривой Безье: смещена вправо/влево по X в зависимости от sway
+
         int ctrlX = (int) (baseX + 30 * sway);
-        int ctrlY = baseY - height / 2; // примерно посередине по высоте
+        int ctrlY = baseY - height / 2;
 
         // Верхушка растения
         int topX  = baseX;
