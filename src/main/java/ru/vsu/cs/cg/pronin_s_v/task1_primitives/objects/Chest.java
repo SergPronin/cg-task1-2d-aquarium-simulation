@@ -27,20 +27,30 @@ public class Chest implements Static, Dynamic {
     private static final double HOLD_OPEN_SEC   = 0.8;
     private static final double HOLD_CLOSED_SEC = 1.0;
 
-    // для надёжного определения «фазы открытия» — сравниваем соседние углы
+    // детектор открытия
     private double prevAngleDeg = 0.0;
-    private boolean openingNow = false;   // true, если угол растёт на этом тике
+    private boolean openingNow = false;
+    private boolean wasOpeningPrev = false;
 
-    // --- пузыри: только при ОТКРЫТИИ, немного ---
+    // --- пузырьки: «залп» при начале открытия + редкая очередь пока открываемся ---
     private final Random rnd = new Random();
-    private double emitTimer = 0.0;
-    private double emitPeriod = 0.24;      // редкие
-    private int emittedThisOpen = 0;
-    private static final int EMIT_MAX_PER_OPEN = 2;
-    private static final double EMIT_MIN_ANGLE = 6.0;
-    private static final double EMIT_MAX_ANGLE = 0.9 * MAX_ANGLE_DEG;
 
-    // точка щели (центр фронтальной кромки)
+    // окно угла, когда уместно пускать пузыри
+    private static final double EMIT_MIN_ANGLE = 5.0;
+    private static final double EMIT_MAX_ANGLE = 0.95 * MAX_ANGLE_DEG;
+
+    // очередь залпа
+    private int burstLeft = 0;            // сколько пузырей осталось выпустить в текущем залпе
+    private double burstCooldown = 0.0;   // время до следующего пузыря в залпе
+    private static final double BURST_CD_MIN = 0.012;  // между пузырями в залпе (12..28 мс)
+    private static final double BURST_CD_MAX = 0.028;
+
+    // редкая очередь (после залпа, пока всё ещё открываемся)
+    private double trickleTimer = 0.0;
+    private static final double TRICKLE_PERIOD_MIN = 0.12; // 1 пузырь раз в 0.12..0.2 с
+    private static final double TRICKLE_PERIOD_MAX = 0.20;
+
+    // точка «щели»
     private int mouthX, mouthY;
 
     public Chest(int x, int y, int width, int height, int lidHeight) {
@@ -54,31 +64,55 @@ public class Chest implements Static, Dynamic {
 
         this.mouthX = x + w / 2;
         this.mouthY = y - 1;
+
+        this.trickleTimer = rand(TRICKLE_PERIOD_MIN, TRICKLE_PERIOD_MAX);
     }
 
     // ==== API для GamePanel ====
     public Point getBubbleOrigin() { return new Point(mouthX, mouthY); }
 
-    /** Пузыри только когда крышка реально ОТКРЫВАЕТСЯ (угол увеличивается), и не больше 2 за одно открытие. */
-    public boolean shouldEmitBubbleThisFrame(double dt) {
-        if (!openingNow) { emitTimer = 0; return false; }
-        if (angleDeg < EMIT_MIN_ANGLE || angleDeg > EMIT_MAX_ANGLE) return false;
-        if (emittedThisOpen >= EMIT_MAX_PER_OPEN) return false;
+    /**
+     * Сколько пузырей нужно выпустить на этом кадре.
+     *  - На РАЗВОРОТЕ «закрыто→открывается» стартует залп (10..18 пузырей быстро).
+     *  - Пока продолжается открытие — редкая очередь (по одному).
+     */
+    public int bubblesToEmit(double dt) {
+        int count = 0;
 
-        emitTimer += dt;
-        if (emitTimer >= emitPeriod) {
-            emitTimer = 0;
-            emitPeriod = 0.22 + rnd.nextDouble() * 0.08; // немного рандома
-            emittedThisOpen++;
-            return true;
+        // если угол вне "рабочего окна", не выпускаем
+        if (angleDeg < EMIT_MIN_ANGLE || angleDeg > EMIT_MAX_ANGLE) {
+            burstLeft = 0;
+            burstCooldown = 0;
+            return 0;
         }
-        return false;
+
+        // залп: пока есть «боезапас» — выдаём серию пузырей с маленьким интервалом
+        if (burstLeft > 0) {
+            burstCooldown -= dt;
+            while (burstLeft > 0 && burstCooldown <= 0.0) {
+                count++;
+                burstLeft--;
+                burstCooldown += rand(BURST_CD_MIN, BURST_CD_MAX);
+                // чтобы не выпускать бесконечно много за один кадр
+                if (count >= 6) break; // кап ограничивает ~6 пузырей за кадр
+            }
+        } else {
+            // если не идёт залп, но мы всё ещё ОТКРЫВАЕМСЯ — редкая очередь
+            if (openingNow) {
+                trickleTimer -= dt;
+                if (trickleTimer <= 0.0) {
+                    count = 1;
+                    trickleTimer = rand(TRICKLE_PERIOD_MIN, TRICKLE_PERIOD_MAX);
+                }
+            }
+        }
+
+        return count;
     }
     // ===========================
 
     @Override
     public void update(double dt) {
-        // сохранение предыдущего угла перед интеграцией
         prevAngleDeg = angleDeg;
 
         if (holdTimer > 0) {
@@ -87,32 +121,45 @@ public class Chest implements Static, Dynamic {
                 targetDeg = (targetDeg < 1.0) ? MAX_ANGLE_DEG : 0.0;
             }
         } else {
-            // пружинная интеграция
             double diff = angleDeg - targetDeg;
             double acc  = -K * diff - C * angVelDeg;
             angVelDeg += acc * dt;
             angleDeg  += angVelDeg * dt;
 
-            // клемп угла
             if (angleDeg < 0) angleDeg = 0;
             if (angleDeg > MAX_ANGLE_DEG) angleDeg = MAX_ANGLE_DEG;
 
-            // фиксация и пауза в крайних положениях
             if (Math.abs(angleDeg - targetDeg) < ANGLE_EPS && Math.abs(angVelDeg) < VEL_EPS) {
                 angleDeg = targetDeg;
                 angVelDeg = 0;
                 if (targetDeg <= 0.0) {
                     holdTimer = HOLD_CLOSED_SEC;
-                    emittedThisOpen = 0; // новый цикл открытия разрешим снова 2 пузыря
-                    emitTimer = 0;
+                    // полный сброс, чтобы следующий цикл снова дал залп
+                    burstLeft = 0;
+                    burstCooldown = 0;
+                    trickleTimer = rand(TRICKLE_PERIOD_MIN, TRICKLE_PERIOD_MAX);
                 } else {
                     holdTimer = HOLD_OPEN_SEC;
                 }
             }
         }
 
-        // определяем факт ОТКРЫТИЯ: угол вырос заметно (на 0.05° и более)
+        // реальное открытие = угол вырос
         openingNow = angleDeg - prevAngleDeg > 0.05;
+
+        // детект фронта «началось открытие» (было не открытие → стало открытие)
+        if (openingNow && !wasOpeningPrev) {
+            // стартуем залп, только если мы уже вылезли из совсем малого угла (чтобы не «в тишине»)
+            if (angleDeg >= EMIT_MIN_ANGLE) {
+                burstLeft = 10 + rnd.nextInt(9); // 10..18
+                burstCooldown = 0.0;             // сразу пойдёт первая порция на ближайшем кадре
+            }
+        }
+        wasOpeningPrev = openingNow;
+
+        // точка «щели» (центр фронта)
+        mouthX = x + w / 2;
+        mouthY = y - 1;
     }
 
     @Override
@@ -120,7 +167,7 @@ public class Chest implements Static, Dynamic {
         Object aa = g2.getRenderingHint(RenderingHints.KEY_ANTIALIASING);
         g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 
-        // === корпус ===
+        // корпус
         RoundRectangle2D body = new RoundRectangle2D.Double(x, y, w, chestHeight, 14, 14);
         g2.setPaint(new GradientPaint(x, y, new Color(120, 78, 40),
                 x, y + chestHeight, new Color(80, 52, 28)));
@@ -145,11 +192,10 @@ public class Chest implements Static, Dynamic {
             g2.setComposite(oldC);
         }
 
-        // === крышка: фронтальное открытие с гарантированной видимостью задней кромки ===
+        // крышка: фронтальная, всегда видна задняя кромка
         double rad = Math.toRadians(angleDeg);
         double depth = lidHeight + 8;
 
-        // ограниченное «сужение» задней кромки — чтобы не исчезала полностью
         double perspectiveBase = 6.0;
         double perspective = (1 - Math.cos(rad)) * perspectiveBase;
         double minP = Math.min(3.0, w * 0.02), maxP = Math.min(10.0, w * 0.07);
@@ -157,56 +203,42 @@ public class Chest implements Static, Dynamic {
 
         double backRise = depth * Math.sin(rad);
 
-        // щель по центру фронта
-        mouthX = x + w / 2;
-        mouthY = y - 1;
-
-        // верхняя плоскость (трапеция)
         Polygon lidTop = new Polygon(
                 new int[]{ x,           x + w,           (int)(x + w - perspective), (int)(x + perspective) },
                 new int[]{ y,           y,               (int)(y - backRise),         (int)(y - backRise)     },
                 4
         );
 
-        // передний торец (толщина)
         int frontT = Math.max(6, lidHeight / 3);
         Rectangle2D lidFront = new Rectangle2D.Double(x, y - frontT, w, frontT);
 
-        // задний «бэк-торец» — всегда виден при угле > 1°
         int backT = 7;
         double backX = x + perspective;
         double backW = Math.max(10, w - 2 * perspective);
         double backY = y - backRise - backT;
         Shape lidBackStrip = new Rectangle2D.Double(backX, backY, backW, backT);
 
-        // заливка верхней плоскости
         g2.setPaint(new GradientPaint(x, (float)(y - backRise), new Color(135, 90, 48),
                 x, y,                      new Color(92,  62, 34)));
         g2.fill(lidTop);
 
-        // контур верхней плоскости — чтобы читалась на любом фоне
         g2.setColor(new Color(60, 40, 26, 200));
         g2.setStroke(new BasicStroke(1.6f));
         g2.draw(lidTop);
 
-        // блик вдоль передней кромки
         g2.setStroke(new BasicStroke(2f));
         g2.setColor(new Color(255, 255, 255, 120));
         g2.drawLine(x + 12, y - frontT + 2, x + w - 12, y - frontT + 2);
 
-        // передний торец
         g2.setPaint(new GradientPaint(x, y - frontT, new Color(100,70,42),
                 x, y,          new Color(70, 50,30)));
         g2.fill(lidFront);
 
-        // задняя кромка / бэк-торец — видим при angleDeg > 1°
         if (angleDeg > 1.0) {
             g2.setColor(new Color(80, 55, 35, 230));
             g2.fill(lidBackStrip);
-            // светлый микро-блик сверху бэк-торца
-            g2.setColor(new Color(255, 255, 255, 120));
+            g2.setColor(new Color(255, 255, 255, 110));
             g2.draw(new Line2D.Double(backX + 1.5, backY + 1, backX + backW - 1.5, backY + 1));
-            // нижний тёмный контур
             g2.setColor(new Color(40, 28, 18, 200));
             g2.draw(new Line2D.Double(backX + 1, backY + backT - 0.6, backX + backW - 1, backY + backT - 0.6));
         }
@@ -231,4 +263,6 @@ public class Chest implements Static, Dynamic {
         g2.fill(new Rectangle2D.Double(lockX + lockW/2.0 - 2, lockY + 6, 4, 6));
         g2.fill(new Ellipse2D.Double(lockX + lockW/2.0 - 3, lockY + 12, 6, 6));
     }
+
+    private double rand(double a, double b) { return a + rnd.nextDouble() * (b - a); }
 }
