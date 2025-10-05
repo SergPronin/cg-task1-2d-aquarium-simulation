@@ -67,7 +67,6 @@ public class Starfish implements Static, Dynamic {
         g2.setColor(edgeColor);
         g2.draw(path);
 
-        // маленькие светлые точки
         g2.setColor(new Color(255, 255, 255, 80));
         for (int i = 0; i < 5; i++) {
             double angle = (2 * Math.PI / 5) * i;

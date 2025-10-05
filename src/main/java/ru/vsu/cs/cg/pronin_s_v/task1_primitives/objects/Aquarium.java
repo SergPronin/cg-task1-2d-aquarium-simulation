@@ -28,7 +28,6 @@ public class Aquarium implements Static {
         );
     }
 
-    // в Aquarium.java
     public Shape getWaterClipShape() {
         // прямоугольник воды до уровня песка (чтобы рыбы не плавали в песке и над крышкой)
         return new Rectangle(

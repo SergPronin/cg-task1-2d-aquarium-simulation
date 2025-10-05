@@ -7,12 +7,6 @@ import java.awt.*;
 import java.awt.geom.*;
 import java.util.Random;
 
-/**
- * Сундук: пузыри только когда крышка ОТКРЫТА (стоит, не движется).
- * - Нет залпов на открытии/закрытии.
- * - Эмиссия включается при устойчивом открытом состоянии и выключается при его потере.
- * - Точка эмиссии следует за «щелью».
- */
 public class Chest implements Static, Dynamic {
 
     private final int x, y, w, chestHeight, lidHeight;

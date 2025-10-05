@@ -6,16 +6,6 @@ import ru.vsu.cs.cg.pronin_s_v.task1_primitives.core.Static;
 import java.awt.*;
 import java.awt.geom.*;
 
-/**
- * Очень простая 2D-рыба:
- * - Тело: вытянутый овал (плоская заливка).
- * - Хвост: треугольный, с лёгким колебанием.
- * - Плавники: верхний и нижний, маленькие треугольники, с минимальным "дыханием".
- * - Глаз: маленький круг с бликом, без рта.
- * - Движение: плавное, с разворотами у стенок аквариума.
- *
- * Конструктор: new Fish(x, y, w, h, bodyColor, finColor)
- */
 public class Fish implements Static, Dynamic {
 
     private double x, y;            // центр рыбы

@@ -23,16 +23,24 @@ public class GamePanel extends JPanel {
     private Aquarium aquarium;
     private Chest chest;
 
-    // ссылки на эмиттеры/растения/звезду (как в твоей предыдущей версии)
     private Plant plant1, plant2, plant3, plant4;
     private Starfish star;
 
-    // таймеры фоновых пузырей (как раньше)
-    private double sandEmitT = 0,   sandEmitPeriodMin = 1.2, sandEmitPeriodMax = 2.2;
-    private double plantsEmitT = 0, plantsEmitPeriodMin = 1.8, plantsEmitPeriodMax = 3.2;
-    private double stonesEmitT = 0, stonesEmitPeriodMin = 3.0, stonesEmitPeriodMax = 5.0;
-    private double starEmitT   = 0, starEmitPeriodMin   = 3.0, starEmitPeriodMax   = 5.0;
-    private double columnEmitT = 0, columnEmitPeriodMin = 2.5, columnEmitPeriodMax = 4.5;
+    private double sandEmitT = 0;
+    private double sandEmitPeriodMin = 1.2;
+    private  double sandEmitPeriodMax = 2.2;
+    private double plantsEmitT = 0;
+    private double plantsEmitPeriodMin = 1.8;
+    private double plantsEmitPeriodMax = 3.2;
+    private double stonesEmitT = 0;
+    private double stonesEmitPeriodMin = 3.0;
+    private double stonesEmitPeriodMax = 5.0;
+    private double starEmitT   = 0;
+    private double starEmitPeriodMin   = 3.0;
+    private double starEmitPeriodMax   = 5.0;
+    private double columnEmitT = 0;
+    private double columnEmitPeriodMin = 2.5;
+    private double columnEmitPeriodMax = 4.5;
 
     private final Timer timer;
     private long lastNs = System.nanoTime();
@@ -75,7 +83,6 @@ public class GamePanel extends JPanel {
         star = new Starfish(starX, starY, 36, new Color(255,150,100), new Color(210,90,60));
         dynamics.add(star);
 
-        // рыбки (если есть класс Fish)
         dynamics.add(new Fish(AQUARIUM_BOUNDS.x + 220, GROUND_LEVEL_Y - 120, 70, 38,
                 new Color(255, 125, 90), new Color(255, 200, 170)));
         dynamics.add(new Fish(AQUARIUM_BOUNDS.x + 430, GROUND_LEVEL_Y - 160, 60, 32,
@@ -106,7 +113,6 @@ public class GamePanel extends JPanel {
                 }
             }
 
-            // --- МАССОВЫЙ ЗАЛП из сундука при открытии ---
             int toEmit = chest.bubblesToEmit(dt);
             if (toEmit > 0) {
                 Point p = chest.getBubbleOrigin();
