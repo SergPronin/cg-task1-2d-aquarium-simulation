@@ -7,50 +7,49 @@ import java.awt.*;
 import java.awt.geom.*;
 import java.util.Random;
 
+/**
+ * Сундук: пузыри только когда крышка ОТКРЫТА (стоит, не движется).
+ * - Нет залпов на открытии/закрытии.
+ * - Эмиссия включается при устойчивом открытом состоянии и выключается при его потере.
+ * - Точка эмиссии следует за «щелью».
+ */
 public class Chest implements Static, Dynamic {
 
     private final int x, y, w, chestHeight, lidHeight;
 
-    // --- кинематика крышки ---
-    private static final double MAX_ANGLE_DEG = 28.0; // умеренное раскрытие
+    // Кинематика крышки (градусы)
+    private static final double MAX_ANGLE_DEG = 35.0;
     private double angleDeg = 0.0;
     private double angVelDeg = 0.0;
     private double targetDeg = 0.0;
 
-    private static final double K = 120.0;  // жёсткость пружины
-    private static final double C = 16.0;   // демпфирование
+    private static final double K = 200.0;   // жёсткость пружины
+    private static final double C = 10.0;    // демпфирование
     private static final double ANGLE_EPS = 0.5;
-    private static final double VEL_EPS   = 1.5;
+    private static final double VEL_EPS = 1.5;
 
-    // паузы
+    // Паузы
     private double holdTimer = 0.0;
-    private static final double HOLD_OPEN_SEC   = 0.8;
-    private static final double HOLD_CLOSED_SEC = 1.0;
+    private static final double HOLD_OPEN_SEC = 1.2;
+    private static final double HOLD_CLOSED_SEC = 1.8;
 
-    // детектор открытия
-    private double prevAngleDeg = 0.0;
-    private boolean openingNow = false;
-    private boolean wasOpeningPrev = false;
+    // «Открыто» = крышка стоит и раскрыта
+    private static final double OPEN_ON_ANGLE = 10.0;   // порог угла, чтобы считать крышку раскрытой
+    private static final double VEL_STILL_EPS = 0.25;   // скорость, близкая к нулю
+    private boolean openState = true;                  // текущее «состояние открыто»
 
-    // --- пузырьки: «залп» при начале открытия + редкая очередь пока открываемся ---
+    // Геометрия крышки (общая для update() и draw())
+    private final int backT = 9;                    // толщина задней полосы
+    private final double perspectiveBase = 8.0;     // базовая «перспектива»
+    private final int frontT;                       // толщина фронт-борта (от lidHeight)
+
+    // Пузырьки (только «частая очередь», без залпов)
     private final Random rnd = new Random();
-
-    // окно угла, когда уместно пускать пузыри
-    private static final double EMIT_MIN_ANGLE = 5.0;
-    private static final double EMIT_MAX_ANGLE = 0.95 * MAX_ANGLE_DEG;
-
-    // очередь залпа
-    private int burstLeft = 0;            // сколько пузырей осталось выпустить в текущем залпе
-    private double burstCooldown = 0.0;   // время до следующего пузыря в залпе
-    private static final double BURST_CD_MIN = 0.012;  // между пузырями в залпе (12..28 мс)
-    private static final double BURST_CD_MAX = 0.028;
-
-    // редкая очередь (после залпа, пока всё ещё открываемся)
     private double trickleTimer = 0.0;
-    private static final double TRICKLE_PERIOD_MIN = 0.12; // 1 пузырь раз в 0.12..0.2 с
-    private static final double TRICKLE_PERIOD_MAX = 0.20;
+    private static final double TRICKLE_PERIOD_MIN = 0.05; // 0.05..0.10 с
+    private static final double TRICKLE_PERIOD_MAX = 0.10;
 
-    // точка «щели»
+    // Точка «щели»
     private int mouthX, mouthY;
 
     public Chest(int x, int y, int width, int height, int lidHeight) {
@@ -60,106 +59,111 @@ public class Chest implements Static, Dynamic {
         this.chestHeight = height;
         this.lidHeight = lidHeight;
 
+        this.frontT = Math.max(7, lidHeight / 3);
+
         this.targetDeg = 0.0;
-
-        this.mouthX = x + w / 2;
-        this.mouthY = y - 1;
-
         this.trickleTimer = rand(TRICKLE_PERIOD_MIN, TRICKLE_PERIOD_MAX);
+
+        updateMouth(); // первичная геометрия щели
     }
 
-    // ==== API для GamePanel ====
-    public Point getBubbleOrigin() { return new Point(mouthX, mouthY); }
+    /** Точка эмиссии пузырьков (следует за щелью) */
+    public Point getBubbleOrigin() {
+        double rad = Math.toRadians(angleDeg);
+        int offsetX = (int) Math.round(Math.sin(rad) * 4.0);
+        int offsetY = (int) Math.round(Math.cos(rad) * Math.min(8, lidHeight * 0.25));
+        return new Point(mouthX + offsetX, mouthY - offsetY);
+    }
 
-    /**
-     * Сколько пузырей нужно выпустить на этом кадре.
-     *  - На РАЗВОРОТЕ «закрыто→открывается» стартует залп (10..18 пузырей быстро).
-     *  - Пока продолжается открытие — редкая очередь (по одному).
-     */
+    /** Сколько пузырей выпустить за кадр dt (только когда состояние «открыто») */
     public int bubblesToEmit(double dt) {
         int count = 0;
 
-        // если угол вне "рабочего окна", не выпускаем
-        if (angleDeg < EMIT_MIN_ANGLE || angleDeg > EMIT_MAX_ANGLE) {
-            burstLeft = 0;
-            burstCooldown = 0;
-            return 0;
-        }
-
-        // залп: пока есть «боезапас» — выдаём серию пузырей с маленьким интервалом
-        if (burstLeft > 0) {
-            burstCooldown -= dt;
-            while (burstLeft > 0 && burstCooldown <= 0.0) {
-                count++;
-                burstLeft--;
-                burstCooldown += rand(BURST_CD_MIN, BURST_CD_MAX);
-                // чтобы не выпускать бесконечно много за один кадр
-                if (count >= 6) break; // кап ограничивает ~6 пузырей за кадр
+        if (openState) {
+            trickleTimer -= dt;
+            while (trickleTimer <= 0.0 && count < 2) {     // ограничим на кадр
+                count += 1 + rnd.nextInt(1);                // 1..3 пузыря
+                trickleTimer += rand(TRICKLE_PERIOD_MIN, TRICKLE_PERIOD_MAX);
             }
         } else {
-            // если не идёт залп, но мы всё ещё ОТКРЫВАЕМСЯ — редкая очередь
-            if (openingNow) {
-                trickleTimer -= dt;
-                if (trickleTimer <= 0.0) {
-                    count = 1;
-                    trickleTimer = rand(TRICKLE_PERIOD_MIN, TRICKLE_PERIOD_MAX);
-                }
-            }
+            // когда не открыто — ничего
         }
 
         return count;
     }
-    // ===========================
 
     @Override
     public void update(double dt) {
-        prevAngleDeg = angleDeg;
+        if (dt > 0.05) dt = 0.05; // кап на dt (если окно было в фоне и т.п.)
 
+        // Паузы в крайних положениях
         if (holdTimer > 0) {
             holdTimer -= dt;
             if (holdTimer <= 0) {
                 targetDeg = (targetDeg < 1.0) ? MAX_ANGLE_DEG : 0.0;
             }
         } else {
-            double diff = angleDeg - targetDeg;
-            double acc  = -K * diff - C * angVelDeg;
+            double diff = targetDeg - angleDeg;
+            double acc = K * diff - C * angVelDeg;
             angVelDeg += acc * dt;
-            angleDeg  += angVelDeg * dt;
+            angleDeg += angVelDeg * dt;
 
-            if (angleDeg < 0) angleDeg = 0;
-            if (angleDeg > MAX_ANGLE_DEG) angleDeg = MAX_ANGLE_DEG;
+            // Ограничители и лёгкий bounce
+            if (angleDeg < 0) {
+                angleDeg = 0;
+                angVelDeg *= -0.3;
+            }
+            if (angleDeg > MAX_ANGLE_DEG) {
+                angleDeg = MAX_ANGLE_DEG;
+                angVelDeg *= -0.3;
+            }
 
+            // Захват в цель и установка паузы
             if (Math.abs(angleDeg - targetDeg) < ANGLE_EPS && Math.abs(angVelDeg) < VEL_EPS) {
                 angleDeg = targetDeg;
                 angVelDeg = 0;
-                if (targetDeg <= 0.0) {
-                    holdTimer = HOLD_CLOSED_SEC;
-                    // полный сброс, чтобы следующий цикл снова дал залп
-                    burstLeft = 0;
-                    burstCooldown = 0;
-                    trickleTimer = rand(TRICKLE_PERIOD_MIN, TRICKLE_PERIOD_MAX);
-                } else {
-                    holdTimer = HOLD_OPEN_SEC;
-                }
+                holdTimer = (targetDeg <= 0.0) ? HOLD_CLOSED_SEC : HOLD_OPEN_SEC;
             }
         }
 
-        // реальное открытие = угол вырос
-        openingNow = angleDeg - prevAngleDeg > 0.05;
+        // Обновляем «состояние открыто»:
+        // 1) угол достаточно большой
+        // 2) скорость мала (стоит)
+        // 3) целевая позиция — открыто (или идёт удержание в открытом)
+        boolean targetIsOpen = targetDeg >= MAX_ANGLE_DEG - 0.1;
+        boolean angleOpenEnough = angleDeg >= OPEN_ON_ANGLE;
+        boolean almostStill = Math.abs(angVelDeg) < VEL_STILL_EPS;
 
-        // детект фронта «началось открытие» (было не открытие → стало открытие)
-        if (openingNow && !wasOpeningPrev) {
-            // стартуем залп, только если мы уже вылезли из совсем малого угла (чтобы не «в тишине»)
-            if (angleDeg >= EMIT_MIN_ANGLE) {
-                burstLeft = 10 + rnd.nextInt(9); // 10..18
-                burstCooldown = 0.0;             // сразу пойдёт первая порция на ближайшем кадре
-            }
+        openState = angleOpenEnough && almostStill && (targetIsOpen || (holdTimer > 0 && targetDeg >= MAX_ANGLE_DEG - 0.1));
+
+        // Когда только что вошли в openState — перезапустим таймер «очереди»,
+        // чтобы пузырьки не слипались между циклами.
+        if (openState && trickleTimer > TRICKLE_PERIOD_MAX) {
+            trickleTimer = rand(TRICKLE_PERIOD_MIN, TRICKLE_PERIOD_MAX);
         }
-        wasOpeningPrev = openingNow;
 
-        // точка «щели» (центр фронта)
-        mouthX = x + w / 2;
-        mouthY = y - 1;
+        // Пересчитать точку «щели»
+        updateMouth();
+    }
+
+    /** Пересчёт координат «щели» с учётом текущего угла и перспективы */
+    private void updateMouth() {
+        double rad = Math.toRadians(angleDeg);
+
+        double perspective = (1 - Math.cos(rad)) * perspectiveBase;
+        double minP = Math.min(4.0, w * 0.02);
+        double maxP = Math.min(14.0, w * 0.09);
+        perspective = Math.max(minP, Math.min(maxP, perspective));
+
+        double depth = lidHeight + 12;
+        double backRise = depth * Math.sin(rad);
+
+        // середина верхней плоскости между передним и задним ребром
+        double topYFront = y - frontT;
+        double topYBack = y - backRise - backT;
+
+        this.mouthX = (int) Math.round(x + w / 2.0);
+        this.mouthY = (int) Math.round((topYFront + topYBack) * 0.5);
     }
 
     @Override
@@ -167,13 +171,13 @@ public class Chest implements Static, Dynamic {
         Object aa = g2.getRenderingHint(RenderingHints.KEY_ANTIALIASING);
         g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 
-        // корпус
+        // Корпус
         RoundRectangle2D body = new RoundRectangle2D.Double(x, y, w, chestHeight, 14, 14);
         g2.setPaint(new GradientPaint(x, y, new Color(120, 78, 40),
                 x, y + chestHeight, new Color(80, 52, 28)));
         g2.fill(body);
 
-        // рейки
+        // Рейки
         g2.setStroke(new BasicStroke(3f));
         g2.setColor(new Color(95, 62, 33));
         for (int i = 1; i <= 3; i++) {
@@ -181,75 +185,73 @@ public class Chest implements Static, Dynamic {
             g2.drawLine(x + 10, yy, x + w - 10, yy);
         }
 
-        // мягкая тень от крышки
+        // Тень от крышки
         if (angleDeg > 2.0) {
-            int shadowH = (int) Math.min(12, 3 + angleDeg * 0.12);
+            int shadowH = (int) Math.min(15, 5 + angleDeg * 0.2);
             Composite oldC = g2.getComposite();
-            g2.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.18f));
-            g2.setPaint(new GradientPaint(x, y, new Color(0,0,0,60),
-                    x, y + shadowH, new Color(0,0,0,0)));
+            g2.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.25f));
+            g2.setPaint(new GradientPaint(x, y, new Color(0, 0, 0, 80),
+                    x, y + shadowH, new Color(0, 0, 0, 0)));
             g2.fill(new Rectangle2D.Double(x + 6, y, w - 12, shadowH));
             g2.setComposite(oldC);
         }
 
-        // крышка: фронтальная, всегда видна задняя кромка
+        // Крышка
         double rad = Math.toRadians(angleDeg);
-        double depth = lidHeight + 8;
+        double depth = lidHeight + 12;
 
-        double perspectiveBase = 6.0;
         double perspective = (1 - Math.cos(rad)) * perspectiveBase;
-        double minP = Math.min(3.0, w * 0.02), maxP = Math.min(10.0, w * 0.07);
+        double minP = Math.min(4.0, w * 0.02);
+        double maxP = Math.min(14.0, w * 0.09);
         perspective = Math.max(minP, Math.min(maxP, perspective));
 
         double backRise = depth * Math.sin(rad);
 
         Polygon lidTop = new Polygon(
-                new int[]{ x,           x + w,           (int)(x + w - perspective), (int)(x + perspective) },
-                new int[]{ y,           y,               (int)(y - backRise),         (int)(y - backRise)     },
+                new int[]{x, x + w, (int) (x + w - perspective), (int) (x + perspective)},
+                new int[]{y, y, (int) (y - backRise), (int) (y - backRise)},
                 4
         );
 
-        int frontT = Math.max(6, lidHeight / 3);
         Rectangle2D lidFront = new Rectangle2D.Double(x, y - frontT, w, frontT);
 
-        int backT = 7;
         double backX = x + perspective;
         double backW = Math.max(10, w - 2 * perspective);
         double backY = y - backRise - backT;
         Shape lidBackStrip = new Rectangle2D.Double(backX, backY, backW, backT);
 
-        g2.setPaint(new GradientPaint(x, (float)(y - backRise), new Color(135, 90, 48),
-                x, y,                      new Color(92,  62, 34)));
+        g2.setPaint(new GradientPaint(x, (float) (y - backRise), new Color(135, 90, 48),
+                x, y, new Color(92, 62, 34)));
         g2.fill(lidTop);
 
         g2.setColor(new Color(60, 40, 26, 200));
-        g2.setStroke(new BasicStroke(1.6f));
+        g2.setStroke(new BasicStroke(1.8f));
         g2.draw(lidTop);
 
-        g2.setStroke(new BasicStroke(2f));
-        g2.setColor(new Color(255, 255, 255, 120));
+        g2.setStroke(new BasicStroke(2.2f));
+        g2.setColor(new Color(255, 255, 255, 140));
         g2.drawLine(x + 12, y - frontT + 2, x + w - 12, y - frontT + 2);
 
-        g2.setPaint(new GradientPaint(x, y - frontT, new Color(100,70,42),
-                x, y,          new Color(70, 50,30)));
+        g2.setPaint(new GradientPaint(x, y - frontT, new Color(100, 70, 42),
+                x, y, new Color(70, 50, 30)));
         g2.fill(lidFront);
 
         if (angleDeg > 1.0) {
             g2.setColor(new Color(80, 55, 35, 230));
             g2.fill(lidBackStrip);
-            g2.setColor(new Color(255, 255, 255, 110));
+            g2.setColor(new Color(255, 255, 255, 120));
             g2.draw(new Line2D.Double(backX + 1.5, backY + 1, backX + backW - 1.5, backY + 1));
             g2.setColor(new Color(40, 28, 18, 200));
             g2.draw(new Line2D.Double(backX + 1, backY + backT - 0.6, backX + backW - 1, backY + backT - 0.6));
         }
 
-        // уголки
+        // Уголки
         g2.setColor(new Color(160, 140, 90));
         g2.setStroke(new BasicStroke(6f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-        g2.drawLine(x + 8,     y - lidHeight + 8, x + 8,     y - 8);
+        g2.drawLine(x + 8, y - lidHeight + 8, x + 8, y - 8);
         g2.drawLine(x + w - 8, y - lidHeight + 8, x + w - 8, y - 8);
 
-        // замок
+        // Замок
         int lockW = 16, lockH = 20;
         int lockX = x + w / 2 - lockW / 2;
         int lockY = y + chestHeight / 2 - lockH / 2;
@@ -260,9 +262,13 @@ public class Chest implements Static, Dynamic {
         g2.setStroke(new BasicStroke(2f));
         g2.draw(lock);
         g2.setColor(new Color(80, 60, 30));
-        g2.fill(new Rectangle2D.Double(lockX + lockW/2.0 - 2, lockY + 6, 4, 6));
-        g2.fill(new Ellipse2D.Double(lockX + lockW/2.0 - 3, lockY + 12, 6, 6));
+        g2.fill(new Rectangle2D.Double(lockX + lockW / 2.0 - 2, lockY + 6, 4, 6));
+        g2.fill(new Ellipse2D.Double(lockX + lockW / 2.0 - 3, lockY + 12, 6, 6));
+
+        g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, aa);
     }
 
-    private double rand(double a, double b) { return a + rnd.nextDouble() * (b - a); }
+    private double rand(double a, double b) {
+        return a + rnd.nextDouble() * (b - a);
+    }
 }

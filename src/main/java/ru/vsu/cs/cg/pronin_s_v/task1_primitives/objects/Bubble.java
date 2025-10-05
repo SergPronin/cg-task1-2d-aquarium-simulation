@@ -5,19 +5,16 @@ import ru.vsu.cs.cg.pronin_s_v.task1_primitives.core.Static;
 
 import java.awt.*;
 import java.awt.geom.Ellipse2D;
-import java.awt.geom.Point2D;
 
 /**
- * CrystalBubble — спокойный пузырёк с кристальным обводом и бликовым серпом.
- * Особенности:
- *  - Очень мягкий дрейф по X с экспоненциальным сглаживанием (без дрожи).
- *  - Незаметная эллиптичность (как от течения): форма чуть «дышит».
- *  - Двойной кант (хроматический): холодный голубой + тёплый розовато-оранжевый.
- *  - Внутренний "серп" блика и слабая аура вокруг.
+ * Простой и красивый 2D-пузырёк:
+ * - Форма: слегка эллиптический круг с мягким "дыханием".
+ * - Заливка: полупрозрачный голубой с лёгким градиентом и бликом.
+ * - Движение: плавный подъём с небольшим дрейфом по X.
  */
 public class Bubble implements Dynamic, Static {
 
-    // Положение/жизненный цикл
+    // Положение и жизненный цикл
     private double x, y;
     private double r;        // базовый радиус
     private double vy;       // скорость подъёма
@@ -25,11 +22,11 @@ public class Bubble implements Dynamic, Static {
     private double ttl;      // время жизни
     private boolean dead = false;
 
-    // Дрейф
+    // Дрейф по X
     private double wobbleAmp;    // амплитуда дрейфа
-    private double f1, f2;       // две очень низкие частоты
-    private double phi1, phi2;   // фазы
-    private double dxSmoothed;   // сглаженный dx
+    private double wobbleFreq;   // частота дрейфа
+    private double wobblePhase;  // фаза
+    private double dxSmoothed;   // сглаженный дрейф
     private double smoothHz;     // скорость сглаживания
 
     // Лёгкая эллиптичность формы
@@ -40,23 +37,21 @@ public class Bubble implements Dynamic, Static {
         this.x = x;
         this.y = y;
 
-        // Жизнь/размеры — спокойные
-        this.r   = 4.8 + Math.random() * 3.8;      // 4.8..8.6
-        this.vy  = -34  - Math.random() * 24;      // -34..-58
-        this.ttl = 3.4  + Math.random() * 2.2;     // 3.4..5.6
+        // Жизнь и размеры
+        this.r = 3.5 + Math.random() * 2.5;    // 3.5..6.0 пикс
+        this.vy = -40 - Math.random() * 20;    // -40..-60 пикс/с
+        this.ttl = 3.0 + Math.random() * 2.0;  // 3.0..5.0 с
 
-        // Дрейф: минимальный, низкочастотный
-        this.wobbleAmp = 2.4 + Math.random() * 1.4; // 2.4..3.8
-        this.f1  = 0.22 + Math.random() * 0.14;     // 0.22..0.36 Гц
-        this.f2  = 0.10 + Math.random() * 0.10;     // 0.10..0.20 Гц
-        this.phi1 = Math.random() * Math.PI * 2;
-        this.phi2 = Math.random() * Math.PI * 2;
-        this.smoothHz = 3.3;                        // сглаживание дрейфа
+        // Дрейф: мягкий и естественный
+        this.wobbleAmp = 2.0 + Math.random() * 1.5;   // 2.0..3.5 пикс
+        this.wobbleFreq = 0.2 + Math.random() * 0.2;  // 0.2..0.4 Гц
+        this.wobblePhase = Math.random() * Math.PI * 2;
+        this.smoothHz = 3.0;                          // сглаживание дрейфа
         this.dxSmoothed = 0.0;
 
-        // Эллиптичность (деликатная)
-        this.shapePulseFreq = 1.4 + Math.random() * 0.8; // 1.4..2.2 Гц
-        this.shapePulseAmp  = 0.05 + Math.random() * 0.03; // 5..8% «дыхания» по оси
+        // Эллиптичность
+        this.shapePulseFreq = 1.2 + Math.random() * 0.6; // 1.2..1.8 Гц
+        this.shapePulseAmp = 0.04 + Math.random() * 0.02; // 4..6% "дыхания"
     }
 
     @Override
@@ -64,20 +59,20 @@ public class Bubble implements Dynamic, Static {
         if (dead) return;
 
         t += dt;
-        if (t >= ttl) { dead = true; return; }
+        if (t >= ttl) {
+            dead = true;
+            return;
+        }
 
         // Подъём
         y += vy * dt;
 
-        // Целевая dx (комбинация низких частот), чуть уменьшается к концу жизни
+        // Дрейф по X
         double lifeK = Math.max(0, 1.0 - t / ttl); // 1..0
-        double amp   = wobbleAmp * (0.6 + 0.4 * lifeK);
+        double amp = wobbleAmp * (0.7 + 0.3 * lifeK);
+        double targetDx = Math.sin((t * wobbleFreq + wobblePhase) * 2 * Math.PI) * amp;
 
-        double targetDx =
-                Math.sin((t * f1 + phi1) * 2 * Math.PI) * amp * 0.7 +
-                        Math.sin((t * f2 + phi2) * 2 * Math.PI) * amp * 0.3;
-
-        // Эксп. сглаживание (one-pole low-pass)
+        // Экспоненциальное сглаживание
         double alpha = 1.0 - Math.exp(-2 * Math.PI * smoothHz * dt);
         dxSmoothed += (targetDx - dxSmoothed) * alpha;
     }
@@ -89,69 +84,37 @@ public class Bubble implements Dynamic, Static {
         double cx = x + dxSmoothed;
         double cy = y;
 
-        // Прозрачность: мягкий спад, ближе к концу — быстрее
+        // Прозрачность: плавный спад
         float a = (float) Math.max(0.0, 1.0 - t / ttl);
-        a = (float) Math.pow(a, 0.9);
+        a = (float) Math.pow(a, 0.85);
         Composite oldC = g2.getComposite();
         g2.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, a));
 
-        // Лёгкое «дыхание» формы (эллипс)
-        double pulse = 1.0 + shapePulseAmp * Math.sin(t * shapePulseFreq * 2 * Math.PI);
-        double rx = r * (1.0 + 0.02 * pulse); // по X практически круг
-        double ry = r * (1.0 - 0.06 * pulse); // по Y немного ужимается/расширяется
+        // Лёгкое "дыхание" формы
+        double pulse = Math.sin(t * shapePulseFreq * 2 * Math.PI) * shapePulseAmp;
+        double rx = r * (1.0 + pulse); // слабое растяжение по X
+        double ry = r * (1.0 - pulse); // слабое сжатие по Y
 
-        // ===== МЯГКАЯ АУРА =====
-        RadialGradientPaint aura = new RadialGradientPaint(
-                new Point2D.Double(cx, cy),
-                (float) (Math.max(rx, ry) * 1.65),
-                new float[]{0f, 0.6f, 1f},
-                new Color[]{
-                        new Color(210, 235, 255, 38),
-                        new Color(190, 215, 240, 16),
-                        new Color(190, 215, 240, 0)
-                }
-        );
-        g2.setPaint(aura);
-        g2.fill(new Ellipse2D.Double(cx - rx * 1.65, cy - ry * 1.65, rx * 3.3, ry * 3.3));
-
-        // ===== ТЕЛО ПУЗЫРЯ (радиальный градиент) =====
-        Point2D center = new Point2D.Double(cx, cy);
-        float radius = (float) Math.max(rx, ry);
-        Color core = new Color(240, 250, 255, 160);
-        Color mid  = new Color(205, 230, 248, 85);
-        Color edge = new Color(165, 205, 235, 55);
-
-        RadialGradientPaint body = new RadialGradientPaint(
-                center, radius,
-                new float[]{0f, 0.55f, 1f},
-                new Color[]{core, mid, edge}
+        // Тело пузырька: лёгкий градиент
+        GradientPaint body = new GradientPaint(
+                (float)(cx - rx * 0.3), (float)(cy - ry * 0.3),
+                new Color(200, 230, 255, 140),
+                (float)(cx + rx * 0.3), (float)(cy + ry * 0.3),
+                new Color(150, 200, 240, 60)
         );
         g2.setPaint(body);
         g2.fill(new Ellipse2D.Double(cx - rx, cy - ry, rx * 2, ry * 2));
 
-        // ===== ВНУТРЕННИЙ СЕРП БЛИКА (сверху-слева) =====
-        double sr = Math.min(rx, ry);
-        double hlx = cx - sr * 0.45;
-        double hly = cy - sr * 0.48;
-        double hlw = sr * 0.9;
-        double hlh = sr * 0.55;
-        g2.setColor(new Color(255, 255, 255, 105));
-        g2.fill(new Ellipse2D.Double(hlx, hly, hlw, hlh));
-
-        // ===== ДВОЙНОЙ ХРОМАТИЧЕСКИЙ КАНТ =====
-        // холодный голубой (внешний тонкий)
-        g2.setStroke(new BasicStroke(1.05f));
-        g2.setColor(new Color(110, 160, 210, 95));
-        g2.draw(new Ellipse2D.Double(cx - rx, cy - ry, rx * 2, ry * 2));
-        // тёплый розовато-оранжевый (внутренний очень тонкий)
-        g2.setStroke(new BasicStroke(0.6f));
-        g2.setColor(new Color(245, 180, 170, 70));
-        double shrink = 0.85;
-        g2.draw(new Ellipse2D.Double(cx - rx * shrink, cy - ry * shrink, rx * 2 * shrink, ry * 2 * shrink));
+        // Блик: маленький полукруг сверху-слева
+        double br = r * 0.6;
+        double bx = cx - r * 0.3;
+        double by = cy - r * 0.3;
+        g2.setColor(new Color(255, 255, 255, 120));
+        g2.fill(new Ellipse2D.Double(bx, by, br * 2, br * 2));
 
         g2.setComposite(oldC);
     }
 
     public boolean isDead() { return dead; }
-    public double getY()    { return y;   }
+    public double getY() { return y; }
 }
